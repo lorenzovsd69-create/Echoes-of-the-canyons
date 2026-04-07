@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GoldRush Games - Echoes of the Canyon</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; font-family: 'Courier New', Courier, monospace; }
+        
+        #ui-container { position: absolute; top: 15px; left: 15px; z-index: 10; pointer-events: none; }
+        .stat-card { 
+            background: rgba(40, 30, 0, 0.8); padding: 10px 18px; border-radius: 5px; 
+            margin-bottom: 8px; border: 2px solid #FFD700;
+            box-shadow: 4px 4px 0px #000;
+        }
+        #ui { color: #FFD700; font-weight: bold; font-size: 20px; text-transform: uppercase; }
+        #money-ui { color: #50ff50; font-weight: bold; font-size: 20px; text-transform: uppercase; }
+
+        #msg-box { 
+            position: absolute; top: 15%; left: 50%; transform: translateX(-50%); 
+            color: #fff; font-weight: bold; font-size: 22px; text-shadow: 3px 3px 0px #000; 
+            text-align: center; display: none; z-index: 30; pointer-events: none;
+            background: rgba(139, 69, 19, 0.8); padding: 15px; border: 2px solid #fff;
+        }
+
+        #dialog-box { 
+            position: absolute; bottom: 180px; left: 50%; transform: translateX(-50%); 
+            width: 85%; background: #221a0f; border: 3px double #FFD700; 
+            color: #f5deb3; padding: 15px; display: none; text-align: center; z-index: 20;
+        }
+
+        #sell-btn, #mount-btn {
+            margin-top: 10px; padding: 12px 25px; background: #c0392b; color: white;
+            border: 2px solid #fff; font-weight: bold; pointer-events: auto; cursor: pointer;
+            text-transform: uppercase; display: none;
+        }
+        #mount-btn { background: #2980b9; }
+
+        #joystick { position: absolute; bottom: 50px; left: 50px; width: 110px; height: 110px; background: rgba(0,0,0,0.4); border-radius: 50%; border: 3px solid #8b4513; z-index: 10; }
+        #knob { position: absolute; width: 50px; height: 50px; background: #FFD700; border-radius: 50%; top: 30px; left: 30px; }
+        
+        #camera-touch-area { position: absolute; top: 0; right: 0; width: 60%; height: 100%; z-index: 5; }
+        #flash { position: fixed; top:0; left:0; width:100%; height:100%; background:white; opacity:0; pointer-events:none; z-index:100; }
+    </style>
+</head>
+<body>
+
+    <div id="flash"></div>
+    <div id="ui-container">
+        <div class="stat-card"><span id="ui">⛏️ OURO: <span id="gold-count">0</span></span></div>
+        <div class="stat-card"><span id="money-ui">💰 BOLSO: $<span id="money-count">0</span></span></div>
+    </div>
+
+    <div id="msg-box"></div>
+    <div id="dialog-box">
+        <div id="dialog-text"></div>
+        <button id="sell-btn">FECHAR NEGÓCIO</button>
+        <button id="mount-btn">MONTAR/DESMONTAR</button>
+    </div>
+
+    <div id="joystick"><div id="knob"></div></div>
+    <div id="camera-touch-area"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xd2b48c); 
+        scene.fog = new THREE.FogExp2(0xd2b48c, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xfff5e1, 1.3);
+        sun.position.set(40, 80, 40);
+        sun.castShadow = true;
+        scene.add(sun);
+
+        let goldInventory = [];
+        let money = 0;
+        let isMounted = false;
+        const walls = []; 
+        const ores = [];
+        let particles;
+
+        function createDust() {
+            const geo = new THREE.BufferGeometry();
+            const pos = [];
+            for(let i=0; i<500; i++) pos.push((Math.random()-0.5)*100, Math.random()*20, (Math.random()-0.5)*500);
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            particles = new THREE.Points(geo, new THREE.PointsMaterial({color: 0x8b4513, size: 0.12, transparent: true, opacity: 0.4}));
+            scene.add(particles);
+        }
+        createDust();
+
+        function createCanyon(zStart, length) {
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x4b3621 });
+            for (let i = 0; i < length; i += 12) {
+                const h = Math.random() * 25 + 15;
+                const left = new THREE.Mesh(new THREE.BoxGeometry(10, h, 12), rockMat);
+                left.position.set(-19, h/2, zStart - i);
+                const right = left.clone();
+                right.position.x = 19;
+                scene.add(left, right);
+                walls.push(new THREE.Box3().setFromObject(left), new THREE.Box3().setFromObject(right));
+            }
+            
+            const wallFront = new THREE.Mesh(new THREE.BoxGeometry(40, 50, 2), rockMat);
+            wallFront.position.set(0, 25, zStart + 5);
+            scene.add(wallFront);
+            walls.push(new THREE.Box3().setFromObject(wallFront));
+
+            const wallBack = wallFront.clone();
+            wallBack.position.z = zStart - length - 5;
+            scene.add(wallBack);
+            walls.push(new THREE.Box3().setFromObject(wallBack));
+        }
+        createCanyon(20, 600);
+
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 1200), new THREE.MeshStandardMaterial({color: 0xa67b5b}));
+        floor.rotation.x = -Math.PI/2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        function createCowboy(bodyC, hatC) {
+            const g = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.2, 8), new THREE.MeshStandardMaterial({color: bodyC}));
+            body.position.y = 0.6;
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+            head.position.y = 1.4;
+            const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.05, 16), new THREE.MeshStandardMaterial({color: hatC}));
+            hat.position.y = 1.6;
+            g.add(body, head, hat);
+            g.castShadow = true;
+            return g;
+        }
+
+        const cowboy = createCowboy(0x3e2723, 0x1b120f);
+        scene.add(cowboy);
+
+        // --- NOVO: Modelo do Cavalo ---
+        function createHorse() {
+            const horseGroup = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.9, 1.6), new THREE.MeshStandardMaterial({color: 0x5d4037}));
+            body.position.y = 0.7;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.7), new THREE.MeshStandardMaterial({color: 0x5d4037}));
+            head.position.set(0, 1.2, -0.9);
+            const neck = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.8, 0.4), new THREE.MeshStandardMaterial({color: 0x5d4037}));
+            neck.position.set(0, 0.9, -0.6);
+            neck.rotation.x = 0.5;
+            horseGroup.add(body, head, neck);
+            horseGroup.visible = false; // Começa escondido
+            return horseGroup;
+        }
+        const activeHorse = createHorse();
+        scene.add(activeHorse);
+        // ------------------------------
+
+        const silas = createCowboy(0x263238, 0x000000);
+        silas.position.set(6, 0, -8);
+        scene.add(silas);
+
+        const barnaby = createCowboy(0x0d47a1, 0x000000);
+        barnaby.position.set(-8, 0, -45);
+        scene.add(barnaby);
+
+        const qualities = [{name: "Fajuto", mult: 0.5}, {name: "Comum", mult: 1.0}, {name: "Raro", mult: 3.0}, {name: "Relíquia", mult: 7.0}];
+        function spawnOre(x, z) {
+            const isPyrite = Math.random() > 0.75;
+            const size = Math.random() * 0.4 + 0.3;
+            const ore = new THREE.Mesh(new THREE.IcosahedronGeometry(size, 0), new THREE.MeshStandardMaterial({ 
+                color: isPyrite ? 0x666666 : 0xFFD700, metalness: 1, roughness: 0.1,
+                emissive: isPyrite ? 0x000000 : 0x221100
+            }));
+            ore.position.set(x, size/2, z);
+            ore.userData = { type: isPyrite ? 'pirita' : 'ouro', size: size, quality: qualities[Math.floor(Math.random()*4)], active: true };
+            scene.add(ore);
+            ores.push(ore);
+        }
+        for(let i=0; i<40; i++) spawnOre((Math.random()-0.5)*32, -Math.random()*580);
+
+        const dialogBox = document.getElementById('dialog-box');
+        const dialogText = document.getElementById('dialog-text');
+        const sellBtn = document.getElementById('sell-btn');
+        const mountBtn = document.getElementById('mount-btn');
+        const msgBox = document.getElementById('msg-box');
+
+        function showMessage(text, color) {
+            msgBox.innerText = text;
+            msgBox.style.borderColor = color;
+            msgBox.style.display = 'block';
+            if(color === "#FFD700") {
+                document.getElementById('flash').style.opacity = "0.3";
+                setTimeout(() => document.getElementById('flash').style.opacity = "0", 100);
+            }
+            setTimeout(() => msgBox.style.display = 'none', 2000);
+        }
+
+        let moveX = 0, moveZ = 0, camY = 0, camX = 0.3, walkCycle = 0;
+        let tStartX = 0, tStartY = 0;
+
+        document.getElementById('joystick').addEventListener('touchmove', (e) => {
+            const t = e.touches[0];
+            const r = document.getElementById('joystick').getBoundingClientRect();
+            moveX = (t.clientX - (r.left + 55)) / 55;
+            moveZ = (t.clientY - (r.top + 55)) / 55;
+            document.getElementById('knob').style.transform = `translate(${Math.max(-30, Math.min(30, moveX*30))}px, ${Math.max(-30, Math.min(30, moveZ*30))}px)`;
+        });
+
+        document.getElementById('joystick').addEventListener('touchend', () => { moveX = 0; moveZ = 0; document.getElementById('knob').style.transform = `translate(0,0)`; });
+
+        document.getElementById('camera-touch-area').addEventListener('touchstart', (e) => { tStartX = e.touches[0].clientX; tStartY = e.touches[0].clientY; });
+        document.getElementById('camera-touch-area').addEventListener('touchmove', (e) => {
+            camY -= (e.touches[0].clientX - tStartX) * 0.008;
+            camX = Math.max(-0.1, Math.min(0.9, camX + (e.touches[0].clientY - tStartY) * 0.008));
+            tStartX = e.touches[0].clientX; tStartY = e.touches[0].clientY;
+        });
+
+        sellBtn.onclick = () => {
+            let total = 0;
+            goldInventory.forEach(g => total += Math.floor(20 * g.size * g.quality.mult));
+            money += total; goldInventory = [];
+            document.getElementById('gold-count').innerText = "0";
+            document.getElementById('money-count').innerText = money;
+            showMessage(`LUCRO: $${total}`, "#00FF00");
+        };
+
+        mountBtn.onclick = () => {
+            isMounted = !isMounted;
+            activeHorse.visible = isMounted; // Mostra/esconde o cavalo
+            if(!isMounted) cowboy.position.y = 0;
+        };
+
+        function checkCollision(targetPos) {
+            const playerBox = new THREE.Box3().setFromCenterAndSize(targetPos, new THREE.Vector3(1, 2, 1));
+            for (let wall of walls) {
+                if (playerBox.intersectsBox(wall)) return true;
+            }
+            return false;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const fwd = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camY);
+            const rgt = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), camY);
+            
+            const speed = isMounted ? 0.5 : 0.28;
+            if(Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
+                const nextPos = cowboy.position.clone();
+                nextPos.add(fwd.clone().multiplyScalar(-moveZ * speed));
+                nextPos.add(rgt.clone().multiplyScalar(moveX * speed));
+
+                if (!checkCollision(nextPos)) {
+                    cowboy.position.copy(nextPos);
+                }
+
+                cowboy.rotation.y = Math.atan2(moveX, -moveZ) + camY;
+                walkCycle += isMounted ? 0.25 : 0.15;
+                cowboy.position.y = (isMounted ? 1.2 : 0) + Math.abs(Math.sin(walkCycle)) * 0.15;
+            }
+
+            // Sincroniza o cavalo com o cowboy
+            if(isMounted) {
+                activeHorse.position.copy(cowboy.position);
+                activeHorse.position.y = cowboy.position.y - 1.2;
+                activeHorse.rotation.y = cowboy.rotation.y;
+            }
+
+            ores.forEach((ore) => {
+                if(ore.userData.active && cowboy.position.distanceTo(ore.position) < 2.5) {
+                    ore.userData.active = false; scene.remove(ore);
+                    if(ore.userData.type === 'ouro') {
+                        goldInventory.push({size: ore.userData.size, quality: ore.userData.quality});
+                        document.getElementById('gold-count').innerText = goldInventory.length;
+                        showMessage("OURO ENCONTRADO!", "#FFD700");
+                    }
+                }
+            });
+
+            const dBarnaby = cowboy.position.distanceTo(barnaby.position);
+            const dSilas = cowboy.position.distanceTo(silas.position);
+
+            if(dBarnaby < 6) {
+                dialogBox.style.display = 'block'; sellBtn.style.display = 'inline-block'; mountBtn.style.display = 'none';
+                dialogText.innerHTML = `Barnaby: "Belo dia para negócios, né?"`;
+            } else if(dSilas < 4 || isMounted) {
+                dialogBox.style.display = 'block'; mountBtn.style.display = 'inline-block'; sellBtn.style.display = 'none';
+                dialogText.innerHTML = isMounted ? "Galopando pelo Canyon..." : "O cavalo do Silas parece amigável.";
+            } else {
+                dialogBox.style.display = 'none';
+            }
+
+            particles.position.z += 0.5; if(particles.position.z > 200) particles.position.z = -200;
+            camera.position.x = cowboy.position.x + Math.sin(camY) * Math.cos(camX) * 15;
+            camera.position.z = cowboy.position.z + Math.cos(camY) * Math.cos(camX) * 15;
+            camera.position.y = cowboy.position.y + Math.sin(camX) * 15 + 5;
+            camera.lookAt(cowboy.position.x, cowboy.position.y + 1, cowboy.position.z);
+            renderer.render(scene, camera);
+        }
+        animate();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
